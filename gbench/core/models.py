@@ -242,26 +242,28 @@ def _enrich_from_config(model: ModelConfig) -> None:
         elif is_tfhub_path(model.hf_model_id):
             normalized_path = normalize_tfhub_path(model.hf_model_id)
             config_src = f"{normalized_path}/config.json"
-            temp_dir = tempfile.mkdtemp(prefix="gbench_tfhub_config_")
-            config_path = os.path.join(temp_dir, "config.json")
-            try:
-                subprocess.run(
-                    ["/google/data/ro/teams/tf-hub/fileutil", "cp", config_src, config_path],
-                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-                )
-                with open(config_path) as f:
+            if os.path.exists(config_src):
+                with open(config_src) as f:
                     config = json.load(f)
-            finally:
-                shutil.rmtree(temp_dir, ignore_errors=True)
+            else:
+                return
         elif ":" in model.hf_model_id or "/" not in model.hf_model_id:
             # Model ID is an Ollama tag (e.g. gemma4-qat:4b) or short name, not an HF repo ID
             return
         else:
-            path = hf_hub_download(model.hf_model_id, "config.json")
+            try:
+                # First try local cache only to avoid network spam/401s on gated models
+                path = hf_hub_download(model.hf_model_id, "config.json", local_files_only=True)
+            except Exception:
+                try:
+                    path = hf_hub_download(model.hf_model_id, "config.json")
+                except Exception as dl_err:
+                    logger.debug(f"Could not fetch config.json for {model.hf_model_id}: {dl_err}")
+                    return
             with open(path) as f:
                 config = json.load(f)
     except Exception as e:
-        logger.warning(
+        logger.debug(
             f"Could not fetch config.json for {model.hf_model_id}: {e}. "
             f"Using defaults."
         )
@@ -358,7 +360,6 @@ def _hf_id_to_short_name(hf_model_id: str) -> str:
     Preserves original casing from HuggingFace.
     E.g. 'google/gemma-4-E4B-it'  → 'gemma-4-E4B-it'
          'google/gemma-4-31B-it'  → 'gemma-4-31B-it'
-         '/tfhub/prod/ml-gemma/GEMMA-4.0-2B-IT-G755-SAFETENSORS/1' -> 'ml-gemma-GEMMA-4.0-2B-IT-G755-SAFETENSORS-v1'
     """
     if is_tfhub_path(hf_model_id):
         return tfhub_path_to_short_name(hf_model_id)
@@ -370,32 +371,34 @@ def _hf_id_to_short_name(hf_model_id: str) -> str:
 # Optional GGUF fields for models that support quantized formats.
 
 _MODEL_DEFS: list[dict] = [
-    # ── Gemma3 ───────────────────────────────────────────────
-    dict(
-        hf_model_id="google/gemma-3-1b-it",
-        gguf_model_id="google/gemma-3-1b-it-qat-q4_0-gguf",
-        gguf_file="gemma3-1b/gemma-3-1b-it-q4_0.gguf",
-    ),
-    dict(
-        hf_model_id="google/gemma-3-4b-it",
-        gguf_model_id="google/gemma-3-4b-it-qat-q4_0-gguf",
-        gguf_file="gemma3-4b/gemma-3-4b-it-q4_0.gguf",
-    ),
-    dict(
-        hf_model_id="google/gemma-3-12b-it",
-        gguf_model_id="google/gemma-3-12b-it-qat-q4_0-gguf",
-        gguf_file="gemma3-12b/gemma-3-12b-it-q4_0.gguf",
-    ),
-    dict(
-        hf_model_id="google/gemma-3-27b-it",
-        gguf_model_id="google/gemma-3-27b-it-qat-q4_0-gguf",
-        gguf_file="gemma3-27b/gemma-3-27b-it-q4_0.gguf",
-    ),
     # ── Gemma4 ───────────────────────────────────────────────
-    dict(hf_model_id="google/gemma-4-E2B-it"),
-    dict(hf_model_id="google/gemma-4-E4B-it"),
-    dict(hf_model_id="google/gemma-4-26B-A4B-it"),
-    dict(hf_model_id="google/gemma-4-31B-it"),
+    dict(
+        hf_model_id="google/gemma-4-E2B-it",
+        total_params_b=2.0,
+        max_context_length=128_000,
+        category=ModelCategory.TEXT,
+    ),
+    dict(
+        hf_model_id="google/gemma-4-E4B-it",
+        total_params_b=4.0,
+        max_context_length=128_000,
+        category=ModelCategory.TEXT,
+    ),
+    dict(
+        hf_model_id="google/gemma-4-26B-A4B-it",
+        total_params_b=26.0,
+        max_context_length=128_000,
+        category=ModelCategory.TEXT,
+        is_moe=True,
+        num_experts=16,
+        num_active_experts=2,
+    ),
+    dict(
+        hf_model_id="google/gemma-4-31B-it",
+        total_params_b=31.0,
+        max_context_length=128_000,
+        category=ModelCategory.TEXT,
+    ),
 ]
 
 
@@ -411,7 +414,8 @@ def _build_models() -> list[ModelConfig]:
             local_path=f"models/{short}",
             **defn,
         )
-        _enrich_from_config(model)
+        if not model.total_params_b:
+            _enrich_from_config(model)
         models.append(model)
     return models
 
