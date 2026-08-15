@@ -22,6 +22,7 @@ import subprocess
 import sys
 import tempfile
 from typing import Any, Dict, List, Optional, Tuple
+from .sampling import stratified_sample
 from .base import run_eval_suite
 
 logger = logging.getLogger(__name__)
@@ -166,7 +167,16 @@ def _load_aider_polyglot_samples(
     if not samples:
         raise RuntimeError("aider_polyglot returned empty exercise set")
     if limit is not None and limit > 0:
-        samples = samples[:limit]
+        # Stratify by language. The loop above concatenates cpp, then go, then python, ...
+        # so a contiguous head returned ONE language: measured `--eval-limit 20` -> 20 cpp
+        # and 0 python/go/rust, which is also why the suite scored a flat 0/20 (a single
+        # toolchain decided every row). This was wrongly exempted from the sampling
+        # contract test as a "per-language loop" - it loops, but applies no per-language
+        # quota.
+        samples = stratified_sample(
+            samples, limit,
+            key_fn=lambda s: (s[2] or {}).get("category") if len(s) > 2 and isinstance(s[2], dict) else None,
+            seed="aider_polyglot")
     logger.info(f"Loaded {len(samples)} aider_polyglot exercises (langs: {available}).")
     return samples
 

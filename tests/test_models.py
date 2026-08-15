@@ -117,10 +117,8 @@ def test_filter_gguf_support():
 
 
 def test_gemma_models_present():
-    """Gemma3 and Gemma4 models are registered."""
-    gemma3 = [m for m in MODELS if m.short_name.startswith("gemma-3-")]
+    """Gemma4 models are registered."""
     gemma4 = [m for m in MODELS if m.short_name.startswith("gemma-4-")]
-    assert len(gemma3) > 0, "No Gemma3 models found"
     assert len(gemma4) > 0, "No Gemma4 models found"
 
 

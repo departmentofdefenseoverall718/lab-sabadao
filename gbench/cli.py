@@ -553,8 +553,8 @@ Examples:
         nargs="?",
         const="evals",
         default=None,
-        choices=["evals", "pillars", "presets", "golden", "models", "plugins", "all"],
-        help="List what gbench can run (evals, pillars, presets, golden, models, plugins, all) and exit",
+        choices=["evals", "pillars", "presets", "campaigns", "golden", "quality", "scenarios", "models", "plugins", "all"],
+        help="List what gbench can run (evals, pillars, presets, campaigns, golden, quality, scenarios, models, plugins, all) and exit",
     )
 
     # Configuration options
@@ -792,8 +792,6 @@ def get_config_from_args(args: argparse.Namespace) -> BenchmarkConfig:
 
     # Override with custom configuration values
     if hasattr(args, "campaign") and args.campaign:
-        if not args.batch_sizes:
-            raise ValueError("--batch-sizes is required when running a campaign. Please specify e.g., --batch-sizes 1 8 16")
         campaigns = args.campaign if isinstance(args.campaign, list) else [args.campaign]
         apply_campaign_to_config(config, campaigns[0], args)
 
@@ -984,6 +982,20 @@ def _handle_list(args) -> int:
     if show("presets"):
         print("\nPresets (--preset):\n  quick    reduced scenario set\n  default  full scenario set")
 
+    if show("campaigns"):
+        campaign_defs = [
+            ("chat-like", "Multi-turn conversational traffic (ShareGPT dataset)"),
+            ("agentic", "Long prompt (8000 tokens), short tool response (400 tokens)"),
+            ("decode-heavy", "Short prompt (128 tokens), long generation (2048 tokens)"),
+            ("prefill-heavy", "Long prompt (8192 tokens), short generation (128 tokens)"),
+            ("mixed", "Balanced prompt (4096 tokens), output (1024 tokens)"),
+            ("long-decode", "High-context prompt (8192 tokens), output (8192 tokens)"),
+        ]
+        print(f"\nWorkload Campaigns ({len(campaign_defs)}) - use with --campaign:\n")
+        width = max(len(c[0]) for c in campaign_defs) + 2
+        for name, desc in campaign_defs:
+            print(f"  {name:<{width}} {desc}")
+
     if show("golden"):
         # Golden tasks are JSON files under gbench/golden_dataset/, each with an "id";
         # there is no module-level constant to import.
@@ -1008,6 +1020,22 @@ def _handle_list(args) -> int:
             cat_w = max((len(r[1]) for r in rows), default=8) + 2
             for tid, cat, desc in rows:
                 print(f"  {tid:<{width}} {cat:<{cat_w}} {desc}")
+
+    if show("quality") or show("scenarios"):
+        quality_scenarios = [
+            ("memory/session_recall.json", "Long-term multi-turn session recall & context retention"),
+            ("memory/profile_update.json", "Dynamic user profile & entity memory extraction"),
+            ("plugins/mcp_routing.json", "Model Context Protocol (MCP) server discovery & routing"),
+            ("plugins/schema_validation.json", "Strict JSON schema validation for tool arguments"),
+            ("tool_calling/parallel_dispatch.json", "Concurrent multi-tool invocation with argument isolation"),
+            ("tool_calling/error_recovery.json", "Autonomous error recovery on failed tool executions"),
+            ("reasoning/planning_decomposition.json", "Step-by-step agent task planning & execution"),
+            ("safety/instruction_injection.json", "Prompt injection & malicious payload resistance"),
+        ]
+        print(f"\nAgent Quality Scenarios ({len(quality_scenarios)}) - use with --scenarios:\n")
+        width = max(len(s[0]) for s in quality_scenarios) + 2
+        for sc_name, sc_desc in quality_scenarios:
+            print(f"  {sc_name:<{width}} {sc_desc}")
 
     if show("models"):
         try:
@@ -1324,15 +1352,16 @@ def main(argv: Optional[list[str]] = None):
             )
 
     conditions = []
+    is_remote = bool(getattr(args, "remote_endpoint", None))
     for model in models:
         mm = run_multimodal and model.supports_multimodal
         pillars = [
             (Pillar.SERVING, run_text and not args.throughput_only and not stress_test_only),
-            (Pillar.THROUGHPUT, run_text and not args.serving_only and not stress_test_only),
+            (Pillar.THROUGHPUT, run_text and not args.serving_only and not stress_test_only and not is_remote),
             (Pillar.SERVING_MULTIMODAL,
              mm and not args.throughput_only and not stress_test_only),
             (Pillar.THROUGHPUT_MULTIMODAL,
-             mm and not args.serving_only and not stress_test_only),
+             mm and not args.serving_only and not stress_test_only and not is_remote),
             (Pillar.STRESS_TEST, run_stress_test),
             (Pillar.QUALITY, run_quality),
             (Pillar.GOLDEN, run_golden),
@@ -1416,8 +1445,8 @@ def main(argv: Optional[list[str]] = None):
                 f"{'='*60}"
             )
 
-            # Apply param-based batch sizes (unless user specified --batch-sizes)
-            if not args.batch_sizes:
+            # Apply param-based batch sizes for performance benchmarks
+            if not args.batch_sizes and not args.golden_only and not args.quality_only:
                 model_batch_sizes = get_batch_sizes(model.total_params_b, args.preset)
                 config.batch_sizes = model_batch_sizes
                 logger.info(f"  Batch sizes for {model.total_params_b:.0f}B: {model_batch_sizes}")
@@ -1434,6 +1463,7 @@ def main(argv: Optional[list[str]] = None):
                     results = serving_runner.run_all(model, format)
                     for result in results:
                         result['benchmark_type'] = 'serving'
+                        result['model'] = model.short_name
                         result['model_name'] = model.name
                         result['model_short'] = model.short_name
                         result['format'] = format.value
@@ -1443,7 +1473,7 @@ def main(argv: Optional[list[str]] = None):
                     total_runs += 1
 
             # Run text-only throughput benchmarks
-            if run_text and not args.serving_only and not stress_test_only:
+            if run_text and not args.serving_only and not stress_test_only and not getattr(args, "remote_endpoint", None):
                 campaigns_to_run = (args.campaign if isinstance(args.campaign, list) else [args.campaign]) if getattr(args, "campaign", None) else [None]
                 for camp in campaigns_to_run:
                     if camp:
@@ -1454,6 +1484,7 @@ def main(argv: Optional[list[str]] = None):
                     results = throughput_runner.run_all(model, format)
                     for result in results:
                         result['benchmark_type'] = 'throughput'
+                        result['model'] = model.short_name
                         result['model_name'] = model.name
                         result['model_short'] = model.short_name
                         result['format'] = format.value
@@ -1474,6 +1505,7 @@ def main(argv: Optional[list[str]] = None):
                     results = serving_runner.run_all(model, format, multimodal=True)
                     for result in results:
                         result['benchmark_type'] = 'serving_multimodal'
+                        result['model'] = model.short_name
                         result['model_name'] = model.name
                         result['model_short'] = model.short_name
                         result['format'] = format.value
@@ -1483,7 +1515,7 @@ def main(argv: Optional[list[str]] = None):
                     total_runs += 1
 
             # Run multimodal benchmarks (throughput) - uses custom offline inference
-            if run_multimodal and model_supports_multimodal and not args.serving_only and not stress_test_only:
+            if run_multimodal and model_supports_multimodal and not args.serving_only and not stress_test_only and not getattr(args, "remote_endpoint", None):
                 campaigns_to_run = (args.campaign if isinstance(args.campaign, list) else [args.campaign]) if getattr(args, "campaign", None) else [None]
                 for camp in campaigns_to_run:
                     if camp:
@@ -1494,6 +1526,7 @@ def main(argv: Optional[list[str]] = None):
                     results = throughput_runner.run_all(model, format, multimodal=True)
                     for result in results:
                         result['benchmark_type'] = 'throughput_multimodal'
+                        result['model'] = model.short_name
                         result['model_name'] = model.name
                         result['model_short'] = model.short_name
                         result['format'] = format.value
@@ -1508,6 +1541,7 @@ def main(argv: Optional[list[str]] = None):
                 stress_results = stress_runner.run_all(model, format)
                 for result in stress_results:
                     result['benchmark_type'] = 'stress_test'
+                    result['model'] = model.short_name
                     result['model_name'] = model.name
                     result['model_short'] = model.short_name
                     result['format'] = format.value
@@ -1519,6 +1553,7 @@ def main(argv: Optional[list[str]] = None):
                 logger.info("Running quality benchmarks (gemmaclaw)...")
                 result = quality_runner.run(model, format)
                 result['benchmark_type'] = 'quality'
+                result['model'] = model.short_name
                 result['model_name'] = model.name
                 result['model_short'] = model.short_name
                 result['format'] = format.value
@@ -1530,6 +1565,7 @@ def main(argv: Optional[list[str]] = None):
                 logger.info("Running Golden Set benchmarks...")
                 result = golden_runner.run(model)
                 result['benchmark_type'] = 'golden'
+                result['model'] = model.short_name
                 result['model_name'] = model.name
                 result['model_short'] = model.short_name
                 result['format'] = format.value

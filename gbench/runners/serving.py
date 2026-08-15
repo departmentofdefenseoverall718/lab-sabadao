@@ -751,6 +751,15 @@ class ServingBenchmarkRunner:
             ))
 
             # Save result to file
+            result["model"] = model.short_name
+            result["model_short"] = model.short_name
+            result["model_name"] = model.name
+            result["format"] = format.value
+            result["batch_size"] = batch_size
+            result["multimodal"] = multimodal
+            result["modality"] = "multimodal" if multimodal else "text"
+            result["benchmark_type"] = "serving"
+            result["output_token_throughput"] = result.get("output_throughput", result.get("output_token_throughput", 0.0))
             with open(output_file, 'w') as f:
                 json.dump(result, f, indent=2)
 
@@ -885,8 +894,9 @@ class ServingBenchmarkRunner:
                 logger.info(f"Warmup [{progress}] {i+1}/{warmup_total} starting...")
                 iter_start = time.time()
                 try:
+                    warmup_reqs = input_requests[:min(2, len(input_requests))] if self.config.remote_endpoint else input_requests
                     asyncio.run(self._run_benchmark_async(
-                        model, format, batch_size, num_prompts, input_requests, tokenizer
+                        model, format, min(batch_size, len(warmup_reqs)), len(warmup_reqs), warmup_reqs, tokenizer
                     ))
                     elapsed = time.time() - iter_start
                     logger.info(f"  Warmup {i+1} completed in {elapsed:.1f}s")
@@ -1032,6 +1042,18 @@ class ServingBenchmarkRunner:
             logger.info(summary)
 
         # Save aggregated results to file
+        aggregated["model"] = model.short_name
+        aggregated["model_short"] = model.short_name
+        aggregated["model_name"] = model.name
+        aggregated["format"] = format.value
+        aggregated["batch_size"] = batch_size
+        aggregated["multimodal"] = multimodal
+        aggregated["modality"] = "multimodal" if multimodal else "text"
+        aggregated["output_token_throughput"] = aggregated.get("output_throughput_mean", aggregated.get("output_throughput", 0.0))
+        aggregated["request_throughput"] = aggregated.get("request_throughput_mean", aggregated.get("request_throughput", 0.0))
+        aggregated["mean_ttft_ms"] = aggregated.get("mean_ttft_ms_mean", aggregated.get("mean_ttft_ms", 0.0))
+        aggregated["mean_tpot_ms"] = aggregated.get("mean_tpot_ms_mean", aggregated.get("mean_tpot_ms", 0.0))
+        aggregated["mean_itl_ms"] = aggregated.get("mean_itl_ms_mean", aggregated.get("mean_itl_ms", 0.0))
         output_file = self._get_output_path(
             model, format, batch_size, multimodal
         )

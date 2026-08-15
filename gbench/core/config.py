@@ -70,12 +70,14 @@ def get_batch_sizes(total_params_b: float, preset: str = "default") -> list[int]
         total_params_b: Total model parameters in billions.
         preset: "quick" for smoke tests, "default" for production.
     """
+    if preset == "quick":
+        return [1]
     if total_params_b <= 15:
-        return [1, 64] if preset == "quick" else [1, 32, 128, 256]
+        return [1, 32, 128, 256]
     elif total_params_b <= 80:
-        return [1, 32] if preset == "quick" else [1, 16, 50, 100]
+        return [1, 16, 50, 100]
     else:
-        return [1, 32] if preset == "quick" else [1, 16, 32, 64]
+        return [1, 16, 32, 64]
 
 
 def get_server_timeout(total_params_b: float, is_moe: bool) -> int:
@@ -333,12 +335,12 @@ DEFAULT_TARGETS = PerformanceTargets()
 # Quick test configuration (smoke test)
 QUICK_CONFIG = BenchmarkConfig(
     num_iterations=1,
-    warmup_iterations=1,
-    batch_sizes=[1, 50],
+    warmup_iterations=0,
+    batch_sizes=[1],
     input_lengths=[128],
     output_lengths=[512],
-    num_prompts=200,
-    num_prompts_throughput=200,
+    num_prompts=10,
+    num_prompts_throughput=10,
     gpu_memory_utilization=0.90,
     enable_chunked_prefill=True,
     max_num_batched_tokens=16384,

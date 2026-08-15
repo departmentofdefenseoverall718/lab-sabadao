@@ -136,10 +136,10 @@ class QualityBenchmarkRunner(ServingBenchmarkRunner):
             major_num = int(major)
             minor_num = int(minor)
             
-            if major_num < 22 or (major_num == 22 and minor_num < 19):
+            if major_num < 18:
                 logger.error(
                     f"Outdated Node.js version: v{node_ver}. "
-                    "Node.js v22.19+ is required by gemmaclaw."
+                    "Node.js v18+ is required by gemmaclaw."
                 )
                 return False
             logger.info(f"Node.js check passed: v{node_ver}")

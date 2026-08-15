@@ -112,7 +112,24 @@ def _load_bfcl_v3_live_samples(
         ]
 
         ground_truth = (ans_obj.get("ground_truth") if isinstance(ans_obj, dict) else []) or []
-        samples.append((messages, ground_truth, {"category": cat_name}))
+        # Declare the tools on the REQUEST as well as rendering them into the system prompt.
+        #
+        # Measured against the live endpoint: with the schemas only in the prompt text, the
+        # model correctly emits `[{"name": ..., "arguments": {...}}]`, but the server runs
+        # `--enable-auto-tool-choice --tool-call-parser`, which recognises that shape and
+        # lifts it out of `content`. With no `tools` declared on the request there is
+        # nowhere for it to go, so it is DISCARDED: `completion_tokens=40, content_chars=0,
+        # tool_calls=0`. That is the 12/20 "empty responses" on the 2026-08-15 sweep - the
+        # model answered every time and the answer was thrown away.
+        #
+        # Declaring them routes the extraction into `tool_calls`, which the trace and
+        # `_eval_bfcl_v3_live` already read.
+        meta = {"category": cat_name}
+        declared = [{"type": "function", "function": fn}
+                    for fn in tools if isinstance(fn, dict) and fn.get("name")]
+        if declared:
+            meta["tools"] = declared
+        samples.append((messages, ground_truth, meta))
 
     logger.info(f"Loaded {len(samples)} canonical BFCL v4 Agentic samples.")
     return samples

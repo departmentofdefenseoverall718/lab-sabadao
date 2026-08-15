@@ -27,6 +27,7 @@ models, models/<short_name> for Gemma4 models.
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -242,13 +243,22 @@ def _enrich_from_config(model: ModelConfig) -> None:
         elif is_tfhub_path(model.hf_model_id):
             normalized_path = normalize_tfhub_path(model.hf_model_id)
             config_src = f"{normalized_path}/config.json"
-            if os.path.exists(config_src):
-                with open(config_src) as f:
+            temp_dir = tempfile.mkdtemp(prefix="gbench_tfhub_config_")
+            config_path = os.path.join(temp_dir, "config.json")
+            try:
+                subprocess.run(
+                    ["cp", "-f", config_src, config_path],
+                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
+                with open(config_path) as f:
                     config = json.load(f)
-            else:
-                return
+            finally:
+                shutil.rmtree(temp_dir, ignore_errors=True)
         elif ":" in model.hf_model_id or "/" not in model.hf_model_id:
             # Model ID is an Ollama tag (e.g. gemma4-qat:4b) or short name, not an HF repo ID
+            m = re.search(r"(\d+(?:\.\d+)?)\s*[bB]\b", model.hf_model_id)
+            if m:
+                model.total_params_b = float(m.group(1))
             return
         else:
             try:
@@ -347,7 +357,15 @@ def _enrich_from_config(model: ModelConfig) -> None:
             ffn_per_layer = 3 * hidden * intermediate
 
         est = (embed_params + layers * (attn_per_layer + ffn_per_layer)) / 1e9
-        model.total_params_b = round(est, 1)
+        if est > 0:
+            model.total_params_b = round(est, 1)
+        else:
+            name_to_search = f"{model.short_name} {model.hf_model_id or ''} {model.name or ''}"
+            m = re.search(r"(\d+(?:\.\d+)?)\s*[bB]\b", name_to_search)
+            if m:
+                model.total_params_b = float(m.group(1))
+            else:
+                model.total_params_b = 0.0
 
     # ── Name fallback ────────────────────────────────────────
     if not model.name:

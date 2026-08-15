@@ -502,12 +502,46 @@ class GoldenBenchmarkRunner:
         if not unit_tests:
             return STATUS_ERROR, "python_exec requires 'unit_tests'"
 
-        code_blocks = re.findall(r"```(?:python)?\s*\n(.*?)```", text, re.DOTALL)
-        code_to_exec = "\n\n".join(code_blocks) if code_blocks else text
+        # Strip reasoning/thought wrappers if present
+        clean_text = re.sub(r"<(?:thought|think|reasoning)>.*?</(?:thought|think|reasoning)>", "", text, flags=re.DOTALL | re.IGNORECASE)
+
+        # Extract markdown code blocks with any python language identifier (python, py, python3, or bare code fence)
+        code_blocks = re.findall(r"```(?:python3?|py)?\s*\n?(.*?)```", clean_text, re.DOTALL | re.IGNORECASE)
+        code_to_exec = "\n\n".join(b.strip() for b in code_blocks if b.strip()) if code_blocks else clean_text.strip()
+
+        # If code_to_exec contains surrounding prose without fences, extract function definitions
+        if "def " in clean_text and not code_blocks:
+            func_matches = re.findall(r"(def\s+\w+\s*\(.*?\).*?)(?=\n(?:def|class|\Z)|\n\n)", clean_text, re.DOTALL)
+            if func_matches:
+                code_to_exec = "\n\n".join(func_matches)
 
         try:
             scope: Dict[str, Any] = {}
             exec(code_to_exec, scope)
+
+            # Auto-bind methods from classes if model wrapped function in a class (e.g. Solution)
+            for k, v in list(scope.items()):
+                if isinstance(v, type):
+                    try:
+                        inst = v()
+                        for attr in dir(inst):
+                            if not attr.startswith("_") and callable(getattr(inst, attr)):
+                                if attr not in scope:
+                                    scope[attr] = getattr(inst, attr)
+                    except Exception:
+                        pass
+
+            # Name normalization fallback (case-insensitive / snake_case vs camelCase)
+            for test in unit_tests:
+                func_names = re.findall(r"([a-zA-Z_]\w*)\s*\(", test)
+                for fn in func_names:
+                    if fn not in scope:
+                        norm_fn = fn.lower().replace("_", "")
+                        for candidate_name, candidate_val in list(scope.items()):
+                            if callable(candidate_val) and candidate_name.lower().replace("_", "") == norm_fn:
+                                scope[fn] = candidate_val
+                                break
+
             for test in unit_tests:
                 exec(test, scope)
             return STATUS_PASSED, f"Passed all {len(unit_tests)} unit test assertions"

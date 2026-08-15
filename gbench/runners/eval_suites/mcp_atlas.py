@@ -81,8 +81,23 @@ def _load_mcp_atlas_samples(
             "finish with your conclusion on the last line as: Final Answer: <response>"
         )
         messages = [{"role": "user", "content": prompt}]
-        samples.append((messages, json.dumps(gtfa_claims),
-                        {"category": server, "claims": gtfa_claims}))
+        # Declare the named tools on the request. The prompt already advertises them, so
+        # the model tries to call one; gemma-4 then emits `<|tool_response>` (a stop token)
+        # and vLLM's tool-call parser lifts the call out of `content`. With no `tools` on
+        # the request the extraction is DISCARDED - measured live as completion_tokens=34,
+        # content=null, tool_calls=[], stop_reason=50, i.e. 13/20 "empty responses" that
+        # were really answers thrown away. MCP-Atlas ships names but no JSON schemas, so
+        # these are permissive stubs: enough for the parser to bind the call.
+        meta = {"category": server, "claims": gtfa_claims}
+        if enabled_tools:
+            meta["tools"] = [{"type": "function",
+                              "function": {"name": t,
+                                           "description": f"MCP tool {t}.",
+                                           "parameters": {"type": "object",
+                                                          "properties": {},
+                                                          "additionalProperties": True}}}
+                             for t in enabled_tools if isinstance(t, str) and t.strip()]
+        samples.append((messages, json.dumps(gtfa_claims), meta))
 
     logger.info(f"Loaded {len(samples)} mcp_atlas samples.")
     return samples

@@ -11,6 +11,7 @@ import logging
 import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
+from .sampling import stratified_sample
 from .base import run_eval_suite, gemini_required_skip, DEFAULT_JUDGE_MODEL, parse_grade_verdict
 
 logger = logging.getLogger(__name__)
@@ -67,7 +68,10 @@ def _load_livebench_samples(
         raise RuntimeError(f"Dataset for livebench returned empty rows")
 
     if limit is not None and limit > 0:
-        rows = rows[:limit]
+        # Stratify by category: the loop above concatenates one category at a time, so a head is ONE category. Wrongly exempted from the sampling
+        # contract test as "iterates categories itself" - it iterates to LOAD, then takes a
+        # contiguous head.
+        rows = stratified_sample(rows, limit, lambda r: (r or {}).get("_livebench_category"), seed="livebench")
 
     samples = []
     ungradeable: Dict[str, int] = {}

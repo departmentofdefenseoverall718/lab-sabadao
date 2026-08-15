@@ -39,6 +39,8 @@ class Reply(NamedTuple):
     finish_reason: Optional[str] = None
     reasoning: Optional[str] = None
     error: Optional[str] = None
+    completion_tokens: int = 0
+    stop_reason: Optional[Any] = None
 
 
 def classify_reply(reply: "Reply") -> str:
@@ -58,7 +60,18 @@ def classify_reply(reply: "Reply") -> str:
     if reply.finish_reason == "length":
         return "truncated"
     if not has_output:
-        return "empty_reasoned" if (reply.reasoning or "").strip() else "empty"
+        if (reply.reasoning or "").strip():
+            return "empty_reasoned"
+        # The server generated tokens and returned none of them. On gemma-4 this is the
+        # model emitting a tool call followed by `<|tool_response>` (token 50, a configured
+        # stop token): vLLM's tool-call parser lifts the call out of `content`, and when the
+        # request declared no `tools` there is nowhere to put it, so it is DISCARDED.
+        # Measured live: completion_tokens=34, content=null, tool_calls=[], stop_reason=50.
+        # That is a suite/serving mismatch, not a model that said nothing - scoring it as an
+        # ordinary wrong answer hid 28 samples across bfcl_v3_live / mcp_atlas / skillsbench.
+        if reply.completion_tokens:
+            return "output_discarded"
+        return "empty"
     return "ok"
 
 #: Judge / grader model for every LLM-graded built-in suite, overridable with
@@ -85,7 +98,8 @@ _RUN_KNOBS: Dict[str, Any] = {}
 #: layers and 25 sliding (window 1024), 8 KV heads x 256 dim in bf16, so KV per sequence is
 #:     L x 40 KiB   (the 5 full layers)  +  200 MiB   (the 25 sliding layers, capped)
 #: With ~92 GiB of KV per engine that sustains roughly
-#:     ~32.5k tokens/sequence at --batch-sizes 256   (64 per engine, non-thinking)
+#:     ~32.5k tokens/sequence at --batch-sizes 256
+#:     ~70.2k tokens/sequence at --batch-sizes 128   (the non-thinking campaign)
 #:     ~70.2k tokens/sequence at --batch-sizes 128   (32 per engine, thinking)
 #: before vLLM starts preempting. Exceeding it costs throughput, not correctness, and
 #: max_tokens is only a ceiling - most responses are far shorter - so these are set
@@ -98,16 +112,18 @@ _RUN_KNOBS: Dict[str, Any] = {}
 #: is raised to this floor. A floor rather than a default because every one of these suites
 #: passes a hardcoded number, which would shadow a plain default (audit P1-7).
 SUITE_MIN_OUTPUT_TOKENS = {
-    # whole-file patches and multi-file diffs: measured up to 114 k chars, still cut at 32768
+    # whole-file patches and multi-file diffs: measured up to 114 k chars, still cut at 65536
     "swe_bench_pro": 65536, "swe_bench_live": 65536, "swe_bench_multilingual": 65536,
     "copilot_bench_swe": 65536, "multi_swe_bench": 65536, "swe_lancer": 65536,
-    # programs, proofs and long chains of reasoning
-    "codeforces": 32768, "lcb": 32768, "scicode": 32768, "multipl_e": 32768,
-    "bigcodebench": 32768, "aider_polyglot": 32768, "skillsbench": 32768,
-    "ojbench": 32768, "cybergym": 32768,
-    "putnam": 32768, "putnam_formal": 32768, "imo_answer_bench": 32768,
-    "humanitys_last_exam": 32768, "hmmt": 32768, "aime": 32768, "new_amc_aime": 32768,
-    "arc_agi": 32768, "livebench": 32768, "gpqa": 32768, "gpqa_diamond": 32768,
+    # programs, proofs and long chains of reasoning. Raised 32768 -> 65536 after the
+    # 2026-08-15 run still truncated arc_agi 3/20 and livebench 6/20 at 32768; the
+    # no-think campaign moved to --batch-sizes 128, whose ~70.2k envelope makes room.
+    "codeforces": 65536, "lcb": 65536, "scicode": 65536, "multipl_e": 65536,
+    "bigcodebench": 65536, "aider_polyglot": 65536, "skillsbench": 65536,
+    "ojbench": 65536, "cybergym": 65536,
+    "putnam": 65536, "putnam_formal": 65536, "imo_answer_bench": 65536,
+    "humanitys_last_exam": 65536, "hmmt": 65536, "aime": 65536, "new_amc_aime": 65536,
+    "arc_agi": 65536, "livebench": 65536, "gpqa": 65536, "gpqa_diamond": 65536,
     # long-form generation that also hit the ceiling
     "browsecomp": 16384, "culer": 16384, "ifeval": 16384, "loft_x_arxiv": 16384,
     "gaia": 16384, "deepsearch_qa": 16384,
@@ -320,6 +336,8 @@ async def _send_single_request(
                         content = msg.get("content") or ""
                         tool_calls = msg.get("tool_calls")
                         finish = choice.get("finish_reason")
+                        stop_reason = choice.get("stop_reason")
+                        usage_tokens = int((data.get("usage") or {}).get("completion_tokens") or 0)
                         # vLLM exposes the gemma-4 reasoning channel under either key.
                         reasoning = msg.get("reasoning_content") or msg.get("reasoning") or None
                         if tool_calls:
@@ -338,8 +356,10 @@ async def _send_single_request(
                                     py_kwargs_clean = ""
                                 call_strs.append(f"{fname}({fargs_str}) {py_kwargs_clean}")
                             return Reply("\n".join(call_strs) + "\n" + str(content),
-                                         tool_calls, finish, reasoning)
-                        return Reply(str(content), None, finish, reasoning)
+                                         tool_calls, finish, reasoning, None,
+                                         usage_tokens, stop_reason)
+                        return Reply(str(content), None, finish, reasoning, None,
+                                     usage_tokens, stop_reason)
                     else:
                         err = await resp.text()
                         if resp.status == 400 and ("maximum context length" in err or "input tokens" in err):
@@ -584,6 +604,8 @@ async def _run_suite_async(
                     "finish_reason": reply.finish_reason,
                     "health": health,
                     "reasoning_chars": len(reply.reasoning or ""),
+                    "completion_tokens": reply.completion_tokens,
+                    "stop_reason": reply.stop_reason,
                     "error": skip_reason,
                     "is_correct": is_correct,
                     "status": status,
@@ -664,6 +686,14 @@ async def _run_suite_async(
         scoring_mode = "deterministic"
 
     over_context = sum(1 for t in sample_traces if t.get("status") == "OVER_CONTEXT")
+    discarded = sum(1 for t in sample_traces if t.get("health") == "output_discarded")
+    if discarded:
+        logger.warning(
+            "[%s] %d/%d responses were GENERATED BUT DISCARDED by the server: the model "
+            "emitted a tool call and the tool-call parser removed it, but the request "
+            "declared no `tools` so there was nowhere to put it. These are not empty "
+            "answers. Declare the suite's tool schemas in the sample meta "
+            "(`{\"tools\": [...]}`) to capture them.", eval_name, discarded, total_count)
     timed_out = sum(1 for t in sample_traces if t.get("status") == "TIMEOUT")
     if timed_out:
         logger.warning(
@@ -696,6 +726,7 @@ async def _run_suite_async(
         "truncated_responses": truncated_responses,
         "over_context_prompts": over_context,
         "timed_out_requests": timed_out,
+        "discarded_outputs": discarded,
         "request_timeout_s": request_timeout_s(effective_max_tokens),
         "tool_rounds": {"samples_using_tools": len(tool_rounds_used),
                         "total_rounds": sum(tool_rounds_used.values())} if tool_rounds_used else None,

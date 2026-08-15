@@ -21,6 +21,7 @@ import shutil
 import subprocess
 import tempfile
 from typing import Any, Dict, List, Optional, Tuple
+from .sampling import stratified_sample
 from .base import run_eval_suite, strip_thinking_tags
 from .sandbox import run_sandboxed
 
@@ -213,7 +214,13 @@ def _load_multipl_e_samples(
             samples.append(([{"role": "user", "content": content}], gold, {"category": lang, "name": name}))
 
     if limit is not None and limit > 0:
-        samples = samples[:limit]
+        # Stratify by language: the loop above concatenates one language at a time, so a head is ONE language. Wrongly exempted from the sampling
+        # contract test as a "per-language loop" - it loops to BUILD, then takes a head, so
+        # `--eval-limit 20` measured a single language and reported it as MultiPL-E.
+        samples = stratified_sample(
+            samples, limit,
+            lambda x: (x[2] or {}).get("category") if len(x) > 2 and isinstance(x[2], dict) else None,
+            seed="multipl_e")
     logger.info(f"Loaded {len(samples)} multipl_e samples (langs: {avail}).")
     return samples
 
